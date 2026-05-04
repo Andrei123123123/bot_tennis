@@ -7,6 +7,9 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 ADMIN_ID = 5495812267
 
+# Хранит: {message_id пересланного сообщения → chat_id пользователя}
+pending_replies: dict[int, int] = {}
+
 # ───── МЕНЮ ─────
 def main_menu():
     keyboard = [
@@ -111,22 +114,26 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(back)
     )
 
-# ───── ВХОДЯЩИЕ СООБЩЕНИЯ → ТЕБЕ ─────
+# ───── ВХОДЯЩИЕ СООБЩЕНИЯ → АДМИНУ ─────
 async def forward_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     text = update.message.text
 
-    await context.bot.send_message(
+    sent = await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=(
             f"📩 <b>Новый вопрос от клиента</b>\n\n"
             f"👤 {user.first_name} {user.last_name or ''}\n"
             f"📎 @{user.username or '—'}\n"
             f"🆔 <code>{user.id}</code>\n\n"
-            f"💬 {text}"
+            f"💬 {text}\n\n"
+            f"<i>Ответь на это сообщение, чтобы написать пользователю от имени бота.</i>"
         ),
         parse_mode="HTML"
     )
+
+    # Запоминаем: пересланное сообщение → пользователь
+    pending_replies[sent.message_id] = user.id
 
     await update.message.reply_text(
         "Получил! Отвечу совсем скоро.\n\n"
@@ -134,15 +141,43 @@ async def forward_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=main_menu()
     )
 
+# ───── ОТВЕТ АДМИНА → ПОЛЬЗОВАТЕЛЮ ─────
+async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    replied_id = update.message.reply_to_message.message_id
+    user_chat_id = pending_replies.get(replied_id)
+
+    if not user_chat_id:
+        await update.message.reply_text("⚠️ Не могу найти пользователя для этого сообщения.")
+        return
+
+    await context.bot.send_message(
+        chat_id=user_chat_id,
+        text=f"💬 <b>Ответ организатора:</b>\n\n{update.message.text}",
+        parse_mode="HTML",
+        reply_markup=main_menu()
+    )
+
+    await update.message.reply_text("✅ Ответ отправлен пользователю.")
+
 # ───── ЗАПУСК ─────
 async def main_async():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, forward_to_admin))
+
+    # Ответ админа на пересланное сообщение
+    app.add_handler(MessageHandler(
+        filters.Chat(ADMIN_ID) & filters.REPLY & filters.TEXT & ~filters.COMMAND,
+        admin_reply
+    ))
+
+    # Сообщения от пользователей (не от админа)
+    app.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND & ~filters.Chat(ADMIN_ID),
+        forward_to_admin
+    ))
 
     stop_event = asyncio.Event()
-
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, stop_event.set)
