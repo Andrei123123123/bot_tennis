@@ -7,8 +7,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 ADMIN_ID = 5495812267
 
-# Хранит: {message_id пересланного сообщения → chat_id пользователя}
-pending_replies: dict[int, int] = {}
+# Хранит: {message_id пересланного сообщения → (chat_id, имя пользователя)}
+pending_replies: dict[int, tuple[int, str]] = {}
 
 # ───── МЕНЮ ─────
 def main_menu():
@@ -119,21 +119,22 @@ async def forward_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     text = update.message.text
 
+    full_name = f"{user.first_name} {user.last_name or ''}".strip()
+    username_str = f"@{user.username}" if user.username else "—"
+
     sent = await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=(
-            f"📩 <b>Новый вопрос от клиента</b>\n\n"
-            f"👤 {user.first_name} {user.last_name or ''}\n"
-            f"📎 @{user.username or '—'}\n"
-            f"🆔 <code>{user.id}</code>\n\n"
+            f"┌ 📩 <b>Вопрос от: {full_name}</b> ({username_str})\n"
+            f"└ 🆔 <code>{user.id}</code>\n\n"
             f"💬 {text}\n\n"
-            f"<i>Ответь на это сообщение, чтобы написать пользователю от имени бота.</i>"
+            f"⬆️ <b>Ответь на это сообщение</b> — и ответ уйдёт именно {full_name}."
         ),
         parse_mode="HTML"
     )
 
-    # Запоминаем: пересланное сообщение → пользователь
-    pending_replies[sent.message_id] = user.id
+    # Запоминаем: пересланное сообщение → (chat_id, имя)
+    pending_replies[sent.message_id] = (user.id, full_name)
 
     await update.message.reply_text(
         "Получил! Отвечу совсем скоро.\n\n"
@@ -144,11 +145,13 @@ async def forward_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ───── ОТВЕТ АДМИНА → ПОЛЬЗОВАТЕЛЮ ─────
 async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     replied_id = update.message.reply_to_message.message_id
-    user_chat_id = pending_replies.get(replied_id)
+    entry = pending_replies.get(replied_id)
 
-    if not user_chat_id:
+    if not entry:
         await update.message.reply_text("⚠️ Не могу найти пользователя для этого сообщения.")
         return
+
+    user_chat_id, user_name = entry
 
     await context.bot.send_message(
         chat_id=user_chat_id,
@@ -157,7 +160,7 @@ async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=main_menu()
     )
 
-    await update.message.reply_text("✅ Ответ отправлен пользователю.")
+    await update.message.reply_text(f"✅ Ответ отправлен → <b>{user_name}</b>", parse_mode="HTML")
 
 # ───── ЗАПУСК ─────
 async def main_async():
