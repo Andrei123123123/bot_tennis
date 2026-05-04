@@ -169,25 +169,38 @@ async def forward_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=main_menu()
     )
 
-# ───── ОТВЕТ АДМИНА → ПОЛЬЗОВАТЕЛЮ ─────
-async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    replied_id = update.message.reply_to_message.message_id
-    entry = pending_replies.get(replied_id)
+# ───── ЛЮБОЕ СООБЩЕНИЕ ОТ АДМИНА (для диагностики) ─────
+async def admin_any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+    if msg.reply_to_message:
+        replied_id = msg.reply_to_message.message_id
+        entry = pending_replies.get(replied_id)
+        logging.info(f"Админ ответил на msg_id={replied_id}. Найдено в pending_replies: {entry}. Всего записей: {len(pending_replies)}")
 
-    if not entry:
-        await update.message.reply_text("⚠️ Не могу найти пользователя для этого сообщения.")
-        return
+        if not entry:
+            await msg.reply_text(
+                f"⚠️ Не нашёл пользователя для этого сообщения.\n"
+                f"Записей в памяти: {len(pending_replies)}\n"
+                f"ID сообщения на которое ты ответил: {replied_id}\n\n"
+                f"Попроси пользователя написать снова и ответь на новое сообщение."
+            )
+            return
 
-    user_chat_id, user_name = entry
-
-    await context.bot.send_message(
-        chat_id=user_chat_id,
-        text=f"💬 <b>Ответ организатора:</b>\n\n{update.message.text}",
-        parse_mode="HTML",
-        reply_markup=main_menu()
-    )
-
-    await update.message.reply_text(f"✅ Ответ отправлен → <b>{user_name}</b>", parse_mode="HTML")
+        user_chat_id, user_name = entry
+        await context.bot.send_message(
+            chat_id=user_chat_id,
+            text=f"💬 <b>Ответ организатора:</b>\n\n{msg.text}",
+            parse_mode="HTML",
+            reply_markup=main_menu()
+        )
+        await msg.reply_text(f"✅ Ответ отправлен → <b>{user_name}</b>", parse_mode="HTML")
+    else:
+        logging.info(f"Админ написал обычное сообщение (не Reply): {msg.text}")
+        await msg.reply_text(
+            "ℹ️ Чтобы ответить пользователю — нажми и удержи нужное сообщение от клиента, "
+            "выбери «Ответить» (Reply), и только потом пиши текст.\n\n"
+            f"Записей в памяти: {len(pending_replies)}"
+        )
 
 # ───── ОБРАБОТЧИК ОШИБОК ─────
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
@@ -206,10 +219,10 @@ async def main_async():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button))
 
-    # Ответ админа на пересланное сообщение
+    # Все сообщения от админа (ответы + обычные)
     app.add_handler(MessageHandler(
-        filters.Chat(ADMIN_ID) & filters.REPLY & filters.TEXT & ~filters.COMMAND,
-        admin_reply
+        filters.Chat(ADMIN_ID) & filters.TEXT & ~filters.COMMAND,
+        admin_any_message
     ))
 
     # Сообщения от пользователей (не от админа)
