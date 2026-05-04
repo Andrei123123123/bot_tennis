@@ -1,7 +1,8 @@
+import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
-TOKEN = 8549793679:AAF36tvY1cuWah3P2lxabRMXn31db7etBxA
+TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 ADMIN_ID = 5495812267
 
 # ───── МЕНЮ ─────
