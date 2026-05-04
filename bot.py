@@ -1,10 +1,19 @@
 import os
 import asyncio
 import signal
+import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.request import HTTPXRequest
 
-TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+if not TOKEN:
+    raise RuntimeError("Переменная TELEGRAM_BOT_TOKEN не найдена. Добавь её в настройках окружения.")
 ADMIN_ID = 5495812267
 
 # Хранит: {message_id пересланного сообщения → (chat_id, имя пользователя)}
@@ -162,9 +171,20 @@ async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"✅ Ответ отправлен → <b>{user_name}</b>", parse_mode="HTML")
 
+# ───── ОБРАБОТЧИК ОШИБОК ─────
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logging.error("Ошибка при обработке обновления:", exc_info=context.error)
+
 # ───── ЗАПУСК ─────
 async def main_async():
-    app = Application.builder().token(TOKEN).build()
+    request = HTTPXRequest(
+        connect_timeout=30,
+        read_timeout=30,
+        write_timeout=30,
+        pool_timeout=30,
+    )
+    app = Application.builder().token(TOKEN).request(request).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button))
 
@@ -180,6 +200,8 @@ async def main_async():
         forward_to_admin
     ))
 
+    app.add_error_handler(error_handler)
+
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -187,10 +209,25 @@ async def main_async():
 
     async with app:
         await app.start()
-        await app.updater.start_polling(drop_pending_updates=True)
+        await app.updater.start_polling(
+            drop_pending_updates=True,
+            allowed_updates=Update.ALL_TYPES,
+        )
         await stop_event.wait()
         await app.updater.stop()
         await app.stop()
 
+def main():
+    while True:
+        try:
+            asyncio.run(main_async())
+        except (KeyboardInterrupt, SystemExit):
+            logging.info("Бот остановлен.")
+            break
+        except Exception as e:
+            logging.error(f"Бот упал с ошибкой: {e}. Перезапускаю через 5 секунд...")
+            import time
+            time.sleep(5)
+
 if __name__ == "__main__":
-    asyncio.run(main_async())
+    main()
