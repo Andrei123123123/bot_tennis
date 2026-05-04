@@ -2,6 +2,7 @@ import os
 import asyncio
 import signal
 import logging
+import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
@@ -16,8 +17,24 @@ if not TOKEN:
     raise RuntimeError("Переменная TELEGRAM_BOT_TOKEN не найдена. Добавь её в настройках окружения.")
 ADMIN_ID = 5495812267
 
+REPLIES_FILE = "pending_replies.json"
+
+def load_replies() -> dict[int, tuple[int, str]]:
+    if os.path.exists(REPLIES_FILE):
+        try:
+            with open(REPLIES_FILE, "r") as f:
+                data = json.load(f)
+                return {int(k): tuple(v) for k, v in data.items()}
+        except Exception:
+            pass
+    return {}
+
+def save_replies(data: dict[int, tuple[int, str]]):
+    with open(REPLIES_FILE, "w") as f:
+        json.dump({str(k): list(v) for k, v in data.items()}, f)
+
 # Хранит: {message_id пересланного сообщения → (chat_id, имя пользователя)}
-pending_replies: dict[int, tuple[int, str]] = {}
+pending_replies: dict[int, tuple[int, str]] = load_replies()
 
 # ───── МЕНЮ ─────
 def main_menu():
@@ -144,6 +161,7 @@ async def forward_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Запоминаем: пересланное сообщение → (chat_id, имя)
     pending_replies[sent.message_id] = (user.id, full_name)
+    save_replies(pending_replies)
 
     await update.message.reply_text(
         "Получил! Отвечу совсем скоро.\n\n"
