@@ -1,4 +1,6 @@
 import os
+import asyncio
+import signal
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
@@ -127,18 +129,30 @@ async def forward_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await update.message.reply_text(
-        f"Получил! Отвечу совсем скоро.\n\n"
+        "Получил! Отвечу совсем скоро.\n\n"
         "Или напрямую: @oceaninthesky",
         reply_markup=main_menu()
     )
 
 # ───── ЗАПУСК ─────
-def main():
+async def main_async():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, forward_to_admin))
-    app.run_polling()
+
+    stop_event = asyncio.Event()
+
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop_event.set)
+
+    async with app:
+        await app.start()
+        await app.updater.start_polling(drop_pending_updates=True)
+        await stop_event.wait()
+        await app.updater.stop()
+        await app.stop()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main_async())
