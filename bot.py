@@ -4,7 +4,7 @@ import signal
 import logging
 import json
 import time
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, ConversationHandler, filters, ContextTypes
@@ -25,9 +25,9 @@ ADMIN_ID = int(os.environ.get("ADMIN_CHAT_ID", "5495812267"))
 REPLIES_FILE = "pending_replies.json"
 
 def spots_left() -> str:
-    return os.environ.get("SPOTS_LEFT", "14")
+    return os.environ.get("SPOTS_LEFT", "12")
 
-def load_replies() -> dict[int, tuple[int, str]]:
+def load_replies() -> dict:
     if os.path.exists(REPLIES_FILE):
         try:
             with open(REPLIES_FILE, "r") as f:
@@ -37,37 +37,32 @@ def load_replies() -> dict[int, tuple[int, str]]:
             pass
     return {}
 
-def save_replies(data: dict[int, tuple[int, str]]):
+def save_replies(data: dict):
     with open(REPLIES_FILE, "w") as f:
         json.dump({str(k): list(v) for k, v in data.items()}, f)
 
-# Хранит: {message_id пересланного сообщения → (chat_id, имя пользователя)}
-pending_replies: dict[int, tuple[int, str]] = load_replies()
+# {message_id пересланного сообщения → (chat_id пользователя, имя)}
+pending_replies: dict = load_replies()
 
-# Follow-up: отслеживаем пользователей
-followup_sent: set[int] = set()      # кому уже отправили follow-up
-user_engaged: set[int] = set()       # кто написал или нажал «Забронировать»
+# Follow-up: отслеживание пользователей
+followup_sent: set = set()   # кому уже отправили follow-up
+user_engaged: set = set()    # кто написал или забронировал
 
-# ───── ФОТО АКТИВНОСТЕЙ ─────
-# Вставь сюда прямые ссылки на фото (https://...) когда будут готовы
-ACTIVITY_PHOTOS: list[str] = [
-    # "https://ссылка-на-фото-яхты.jpg",
-    # "https://ссылка-на-фото-тейде.jpg",
-    # "https://ссылка-на-фото-замка.jpg",
-]
-
-# ───── СОСТОЯНИЯ ФОРМЫ БРОНИРОВАНИЯ ─────
+# Состояния формы бронирования
 WAITING_NAME, WAITING_PHONE = range(2)
 
+
 # ───── МЕНЮ ─────
+
 def main_menu():
     keyboard = [
-        [InlineKeyboardButton("Программа и цены", callback_data="programa")],
-        [InlineKeyboardButton("О кемпе", callback_data="about")],
-        [InlineKeyboardButton("Активности", callback_data="aktivnosti")],
-        [InlineKeyboardButton("Виза", callback_data="viza")],
-        [InlineKeyboardButton("Забронировать место", callback_data="booking")],
-        [InlineKeyboardButton("Задать вопрос", callback_data="question")],
+        [InlineKeyboardButton("🎾 Программа и цена (1 350 €)", callback_data="programa")],
+        [InlineKeyboardButton("🏡 Вилла и сервис", callback_data="villa")],
+        [InlineKeyboardButton("🌋 Активности вне корта", callback_data="aktivnosti")],
+        [InlineKeyboardButton("✈️ Виза и перелёт", callback_data="viza")],
+        [InlineKeyboardButton("❓ Частые вопросы", callback_data="faq")],
+        [InlineKeyboardButton("📋 Забронировать место", callback_data="booking")],
+        [InlineKeyboardButton("💬 Задать вопрос", callback_data="question")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -77,7 +72,9 @@ def cancel_keyboard():
 def back_keyboard():
     return InlineKeyboardMarkup([[InlineKeyboardButton("← Назад", callback_data="back")]])
 
-# ───── FOLLOW-UP ЗАДАЧА ─────
+
+# ───── FOLLOW-UP ЧЕРЕЗ 24 ЧАСА ─────
+
 async def send_followup(bot, user_id: int, user_name: str):
     await asyncio.sleep(24 * 60 * 60)
     if user_id in user_engaged or user_id in followup_sent:
@@ -85,14 +82,16 @@ async def send_followup(bot, user_id: int, user_name: str):
     try:
         await bot.send_message(
             chat_id=user_id,
-            text="Если остались вопросы — пиши, отвечу быстро. @oceaninthesky",
+            text="Если остались вопросы по кемпу — пишите прямо сюда, отвечу лично.",
         )
         followup_sent.add(user_id)
         logging.info(f"Follow-up отправлен: {user_name} ({user_id})")
     except Exception as e:
         logging.warning(f"Не удалось отправить follow-up пользователю {user_id}: {e}")
 
+
 # ───── СТАРТ ─────
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     name = user.first_name
@@ -100,18 +99,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username_str = f"@{user.username}" if user.username else "—"
 
     await update.message.reply_text(
-        f"Привет, {name}.\n\n"
-        "Теннис и падел кемп на Тенерифе. 14–20 сентября 2026.\n\n"
-        "7 дней на Канарских островах. Вилла с личным поваром. "
-        "6 тренировок в Tenerife Tennis Academy — теннис или падел, выбираешь каждый день. "
-        "Яхта, вулкан Тейде, сёрфинг, банкет в замке. "
-        "Шенген по приглашению от академии.\n\n"
-        f"Группа — 14 человек. Осталось {spots_left()} мест.\n\n"
-        "В любой момент напиши /menu чтобы вернуться в меню.",
+        f"Добрый день, {name}.\n\n"
+        "Теннис и падел-кемп на Тенерифе. 20–26 октября 2026.\n\n"
+        "7 дней на Канарских островах: вилла с личным поваром, "
+        "6 тренировок в Tenerife Tennis Academy, "
+        "яхта, вулкан Тейде, серфинг. "
+        "Шенген по спортивному приглашению от академии.\n\n"
+        f"Группа — 12 человек. Осталось {spots_left()} мест.\n"
+        "Стоимость — 1 350 €. Перелёт и виза — отдельно.\n\n"
+        "В любой момент напишите /menu, чтобы вернуться в меню.",
         reply_markup=main_menu()
     )
 
-    # Уведомляем организатора о новом пользователе
+    # Уведомление организатору о новом пользователе
     try:
         await context.bot.send_message(
             chat_id=ADMIN_ID,
@@ -128,14 +128,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user.id not in followup_sent:
         asyncio.create_task(send_followup(context.bot, user.id, full_name))
 
-# ───── МЕНЮ КОМАНДА ─────
+
+# ───── КОМАНДА /menu ─────
+
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Выбери что тебя интересует:",
+        "Выберите интересующий раздел:",
         reply_markup=main_menu()
     )
 
+
 # ───── КНОПКИ ─────
+
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -143,100 +147,127 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "programa":
         await query.edit_message_text(
             text=(
-                "<b>Программа и цены</b>\n\n"
-                "14–20 сентября 2026 · Тенерифе · 14 человек\n\n"
+                "<b>Программа и цена</b>\n\n"
+                "20–26 октября 2026 · Тенерифе · 12 человек\n\n"
                 "━━━━━━━━━━━━━━━\n"
-                "<b>Кемп — 110 000 ₽</b>\n"
-                "· 6 тренировок в Tenerife Tennis Academy\n"
-                "· Русскоязычный тренер\n"
-                "· Теннис или падел — выбираешь каждый день\n"
-                "· Все активности: яхта, Тейде, Маска, сёрфинг, банкет в замке\n"
-                "· Трансфер аэропорт ↔ вилла\n"
-                "· Питание: завтрак + обед + ужин (личный повар, всё включено)\n\n"
-                "<b>Вилла — 50 000 ₽</b>\n"
-                "· 7 ночей, вилла на всю группу, бассейн, Wi-Fi\n\n"
-                "<b>Авиабилеты — ~90 000 ₽</b>\n"
-                "· Помогаем подобрать оптимальный рейс\n\n"
-                "<b>Виза — ~20 000 ₽</b>\n"
-                "· Шенгенская виза через приглашение от академии\n"
-                "· Партнёр ВизаGO — 500+ виз, 97% одобрение\n\n"
+                "<b>1 350 € — всё включено:</b>\n\n"
+                "🎾 6 тренировок в Tenerife Tennis Academy\n"
+                "Теннис или падел — выбираете каждый день. Русскоязычный тренер.\n\n"
+                "🏡 Проживание на вилле — 7 ночей\n"
+                "Вилла на всю группу. Бассейн, терраса, общие зоны.\n\n"
+                "👨‍🍳 Питание\n"
+                "Завтрак, обед и ужин — шеф-повар. Всё на вилле.\n\n"
+                "🚌 Трансфер\n"
+                "Аэропорт ↔ вилла включён.\n\n"
+                "🌋 Все активности\n"
+                "Яхта, вулкан Тейде, ущелье Маска, серфинг, банкет в замке.\n\n"
                 "━━━━━━━━━━━━━━━\n"
-                "<b>Итого с перелётом и визой: ~270 000 ₽</b>\n\n"
-                "Депозит для брони: 33 000 ₽\n"
-                "Остаток — двумя платежами до сентября."
+                "Оплачивается отдельно:\n"
+                "· Перелёт — от 600 €\n"
+                "· Виза — около 200 €\n\n"
+                "Депозит для фиксации места: 350 €\n"
+                "Остаток — двумя платежами до октября."
             ),
             parse_mode="HTML",
             reply_markup=back_keyboard()
         )
 
-    elif query.data == "about":
+    elif query.data == "villa":
         await query.edit_message_text(
             text=(
-                "Есть острова, которые существуют сами по себе. Тенерифе — один из них.\n\n"
-                "Вулкан 3718 метров, видный с любой точки острова. "
-                "Атлантика — с одной стороны тёплая и спокойная, с другой дикая и с волнами. "
-                "Чёрные пляжи, ущелья, испанская кухня без туристических наценок.\n\n"
-                "Мы арендовали виллу на всю группу. Наняли повара. "
-                "Договорились с Tenerife Tennis Academy — академией, "
-                "где тренируются спортсмены из Англии, Германии, Скандинавии.\n\n"
-                "Утром — остров. Вечером — корт. Ночью — ужин на террасе, "
-                "рыба с местного рынка и вино, которое здесь дешевле воды.\n\n"
-                "Семь дней. Четырнадцать человек. "
-                "Это не тур и не спортлагерь. "
-                "Это неделя, после которой сложно вернуться к обычному сентябрю."
+                "<b>Вилла и сервис</b>\n\n"
+                "Вилла арендована целиком — только ваша группа, никаких посторонних.\n\n"
+                "🏡 Бассейн, терраса, общие зоны для отдыха. "
+                "7 ночей без бытовых забот: уборка, питание и всё необходимое организовано.\n\n"
+                "👨‍🍳 Личный шеф-повар на весь кемп.\n"
+                "Завтрак, обед, ужин — на вилле. "
+                "Меню согласовывается заранее с учётом предпочтений группы.\n\n"
+                "📶 Wi-Fi, всё необходимое для комфортного проживания.\n\n"
+                "Вилла расположена в удобной точке острова — "
+                "10–15 минут до академии и основных активностей."
             ),
             parse_mode="HTML",
             reply_markup=back_keyboard()
         )
 
     elif query.data == "aktivnosti":
-        aktivnosti_text = (
-            "<b>Активности</b>\n\n"
-            "Каждое утро — новое приключение:\n\n"
-            "⛵ <b>Яхта</b>\n"
-            "Выход в океан, купание, дельфины\n\n"
-            "🌋 <b>Вулкан Тейде, 3718 м</b>\n"
-            "Самая высокая точка Испании\n\n"
-            "🏔 <b>Ущелье Маска</b>\n"
-            "Хайкинг по одному из красивейших маршрутов Канар\n\n"
-            "🏄 <b>Сёрфинг</b>\n"
-            "С инструктором, для любого уровня\n\n"
-            "🏰 <b>Банкет в замке Сан-Мигель</b>\n"
-            "Рыцарское шоу, ужин, живая история\n\n"
-            "Все активности включены в стоимость кемпа."
+        await query.edit_message_text(
+            text=(
+                "<b>Активности вне корта</b>\n\n"
+                "Участие в каждой активности — по желанию.\n\n"
+                "⛵ Яхта\n"
+                "Выход в Атлантику, купание в открытом океане.\n\n"
+                "🌋 Вулкан Тейде — 3 718 м\n"
+                "Самая высокая точка Испании. "
+                "Панорама острова с вершины.\n\n"
+                "🏔 Ущелье Маска\n"
+                "Один из наиболее живописных маршрутов Канарских островов.\n\n"
+                "🏄 Серфинг\n"
+                "С инструктором, подходит для любого уровня.\n\n"
+                "🏰 Банкет в замке Сан-Мигель\n"
+                "Исторический замок, ужин, живое шоу.\n\n"
+                "Все активности включены в стоимость кемпа."
+            ),
+            parse_mode="HTML",
+            reply_markup=back_keyboard()
         )
-        if ACTIVITY_PHOTOS:
-            media = [InputMediaPhoto(media=url) for url in ACTIVITY_PHOTOS]
-            media[0] = InputMediaPhoto(
-                media=ACTIVITY_PHOTOS[0], caption=aktivnosti_text, parse_mode="HTML"
-            )
-            await query.message.reply_media_group(media=media)
-            await query.edit_message_text(
-                "Смотри фото активностей выше 👆",
-                reply_markup=back_keyboard()
-            )
-        else:
-            await query.edit_message_text(
-                text=aktivnosti_text,
-                parse_mode="HTML",
-                reply_markup=back_keyboard()
-            )
 
     elif query.data == "viza":
         await query.edit_message_text(
             text=(
-                "<b>Виза</b>\n\n"
-                "Тенерифе — Испания, нужен шенген.\n\n"
-                "Оформляем через спортивное приглашение от Tenerife Tennis Academy — "
-                "это официальный документ, который значительно повышает шансы на одобрение.\n\n"
-                "<b>Всем занимается партнёр ВизаGO:</b>\n"
-                "· Приглашение от академии\n"
-                "· Сбор документов\n"
-                "· Запись в консульство\n"
-                "· 500+ виз, 97% одобрение\n\n"
-                "Стоимость: ~20 000 ₽\n"
-                "Срок рассмотрения: 2–4 недели\n\n"
-                "Бронируй минимум за 6 недель до вылета."
+                "<b>Виза и перелёт</b>\n\n"
+                "✈️ <b>Перелёт</b>\n"
+                "Тенерифе-Юг (TFS) — прямые рейсы из Москвы и Санкт-Петербурга. "
+                "Стоимость от 600 €. Помогаем подобрать подходящий рейс.\n\n"
+                "🛂 <b>Виза</b>\n"
+                "Тенерифе — Испания, требуется шенгенская виза.\n\n"
+                "Оформляется через партнёра <b>VIZAGO</b> под ключ, "
+                "на основе спортивного приглашения от Tenerife Tennis Academy. "
+                "Это официальный документ, подтверждающий спортивный характер поездки.\n\n"
+                "Что входит в услугу VIZAGO:\n"
+                "· Получение приглашения от академии\n"
+                "· Подготовка документов\n"
+                "· Запись в консульство\n\n"
+                "Стоимость: около 200 €\n"
+                "Срок оформления: 2–4 недели\n\n"
+                "Рекомендуем бронировать место минимум за 6–8 недель до вылета."
+            ),
+            parse_mode="HTML",
+            reply_markup=back_keyboard()
+        )
+
+    elif query.data == "faq":
+        await query.edit_message_text(
+            text=(
+                "<b>Частые вопросы</b>\n\n"
+                "❓ <b>Какой уровень игры необходим?</b>\n"
+                "Любой. Кемп подходит и начинающим, и тем, кто играет годами. "
+                "Тренер адаптирует нагрузку под каждого участника.\n\n"
+                "❓ <b>Можно играть и теннис, и падел?</b>\n"
+                "Да. Каждый день вы выбираете дисциплину самостоятельно. "
+                "Можно чередовать в течение всей недели.\n\n"
+                "❓ <b>Можно приехать одному, без компании?</b>\n"
+                "Да. Большинство участников едут именно так. "
+                "Группа — 12 человек, формат располагает к знакомствам.\n\n"
+                "❓ <b>Что входит в стоимость 1 350 €?</b>\n"
+                "Проживание на вилле (7 ночей), питание (шеф-повар), "
+                "6 тренировок, трансфер аэропорт ↔ вилла, все активности.\n"
+                "Перелёт и виза — оплачиваются отдельно.\n\n"
+                "❓ <b>Как устроена оплата?</b>\n"
+                "Депозит 350 € — для фиксации места. "
+                "Остаток — двумя платежами до октября. "
+                "Реквизиты предоставляются после оформления заявки.\n\n"
+                "❓ <b>Что если в визе откажут?</b>\n"
+                "VIZAGO работает на основе официального спортивного приглашения — "
+                "это повышает вероятность одобрения. "
+                "В случае отказа обсуждаем индивидуально.\n\n"
+                "❓ <b>Когда лучше бронировать?</b>\n"
+                f"Как можно раньше. Осталось {spots_left()} мест из 12. "
+                "На оформление визы нужно минимум 6–8 недель.\n\n"
+                "❓ <b>Что взять с собой?</b>\n"
+                "Ракетку (можно взять на месте), спортивную форму, солнцезащитный крем. "
+                "Полный список пришлём после бронирования.\n\n"
+                "Остались вопросы — напишите: @oceaninthesky"
             ),
             parse_mode="HTML",
             reply_markup=back_keyboard()
@@ -246,33 +277,30 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_engaged.add(query.from_user.id)
         await query.edit_message_text(
             text=(
-                "<b>Задать вопрос</b>\n\n"
-                "Напиши свой вопрос прямо здесь — "
+                "Напишите ваш вопрос прямо здесь — "
                 "организатор получит его и ответит лично.\n\n"
-                "Или сразу в личку: @oceaninthesky"
+                "Или напрямую: @oceaninthesky"
             ),
-            parse_mode="HTML",
             reply_markup=back_keyboard()
         )
 
     elif query.data == "back":
         await query.edit_message_text(
-            "Выбери что тебя интересует:",
+            "Выберите интересующий раздел:",
             reply_markup=main_menu()
         )
 
+
 # ───── ФОРМА БРОНИРОВАНИЯ ─────
+
 async def booking_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_engaged.add(query.from_user.id)
     await query.edit_message_text(
-        "<b>Забронировать место</b>\n\n"
-        f"Осталось {spots_left()} мест из 14.\n\n"
-        "Оставь заявку — мы свяжемся в течение нескольких часов, "
-        "ответим на все вопросы и зафиксируем место.\n\n"
-        "Как тебя зовут? (имя и фамилия)",
-        parse_mode="HTML",
+        f"Забронировать место.\n\n"
+        f"Осталось {spots_left()} мест из 12.\n\n"
+        "Как к вам обращаться? (Имя и фамилия)",
         reply_markup=cancel_keyboard()
     )
     return WAITING_NAME
@@ -281,7 +309,7 @@ async def booking_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["booking_name"] = update.message.text
     user_engaged.add(update.effective_user.id)
     await update.message.reply_text(
-        "Теперь укажи номер телефона или @username в Telegram:",
+        "Оставьте ваш номер телефона или @username в Telegram.",
         reply_markup=cancel_keyboard()
     )
     return WAITING_PHONE
@@ -296,32 +324,23 @@ async def booking_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sent = await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=(
-            f"🎾 <b>Новая заявка на кемп!</b>\n\n"
-            f"👤 <b>{name}</b>\n"
+            f"📋 <b>Новая заявка на кемп</b>\n\n"
+            f"👤 {name}\n"
             f"📞 {phone}\n"
             f"📎 {username_str}\n"
             f"🆔 <code>{user.id}</code>\n\n"
-            f"⬆️ <b>Ответь на это сообщение</b> — и ответ уйдёт клиенту."
+            f"Ответьте на это сообщение — ответ уйдёт клиенту."
         ),
         parse_mode="HTML"
     )
     pending_replies[sent.message_id] = (user.id, name)
     save_replies(pending_replies)
 
-    share_keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(
-            "Поделиться с другом",
-            url="https://t.me/share/url?url=https://t.me/tennis_tenerife&text=Теннисный+и+падел+кемп+на+Тенерифе+%E2%80%94+14-20+сентября+2026"
-        )],
-        [InlineKeyboardButton("← В меню", callback_data="back")],
-    ])
-
     await update.message.reply_text(
-        "<b>Заявка принята.</b>\n\n"
-        "Свяжемся в ближайшие несколько часов.\n\n"
-        "Приведи друга — он получит скидку 5 000 ₽, ты — бонус.",
-        parse_mode="HTML",
-        reply_markup=share_keyboard
+        "Заявка принята.\n\n"
+        "Организатор свяжется с вами в течение пары часов, "
+        "чтобы обсудить ваш уровень игры и подобрать подходящую комнату на вилле.",
+        reply_markup=back_keyboard()
     )
     return ConversationHandler.END
 
@@ -329,12 +348,14 @@ async def booking_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     await query.edit_message_text(
-        "Выбери что тебя интересует:",
+        "Выберите интересующий раздел:",
         reply_markup=main_menu()
     )
     return ConversationHandler.END
 
-# ───── ВХОДЯЩИЕ СООБЩЕНИЯ → АДМИНУ ─────
+
+# ───── ВХОДЯЩИЕ СООБЩЕНИЯ → ОРГАНИЗАТОРУ ─────
+
 async def forward_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     text = update.message.text
@@ -345,10 +366,10 @@ async def forward_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sent = await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=(
-            f"┌ 📩 <b>Вопрос от: {full_name}</b> ({username_str})\n"
-            f"└ 🆔 <code>{user.id}</code>\n\n"
-            f"💬 {text}\n\n"
-            f"⬆️ <b>Ответь на это сообщение</b> — и ответ уйдёт {full_name}."
+            f"💬 <b>Вопрос от: {full_name}</b> ({username_str})\n"
+            f"🆔 <code>{user.id}</code>\n\n"
+            f"{text}\n\n"
+            f"Ответьте на это сообщение — ответ уйдёт клиенту."
         ),
         parse_mode="HTML"
     )
@@ -356,12 +377,14 @@ async def forward_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_replies(pending_replies)
 
     await update.message.reply_text(
-        "Получил. Отвечу в ближайшее время.\n\n"
+        "Сообщение получено. Ответим в ближайшее время.\n\n"
         "Или напрямую: @oceaninthesky",
         reply_markup=main_menu()
     )
 
+
 # ───── МЕДИАФАЙЛЫ ОТ ПОЛЬЗОВАТЕЛЕЙ ─────
+
 async def forward_media_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     full_name = f"{user.first_name} {user.last_name or ''}".strip()
@@ -387,8 +410,8 @@ async def forward_media_to_admin(update: Update, context: ContextTypes.DEFAULT_T
     await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=(
-            f"┌ 📎 <b>{media_type.capitalize()} от: {full_name}</b> ({username_str})\n"
-            f"└ 🆔 <code>{user.id}</code>"
+            f"📎 <b>{media_type.capitalize()} от: {full_name}</b> ({username_str})\n"
+            f"🆔 <code>{user.id}</code>"
         ),
         parse_mode="HTML"
     )
@@ -399,52 +422,58 @@ async def forward_media_to_admin(update: Update, context: ContextTypes.DEFAULT_T
     )
 
     await update.message.reply_text(
-        "Получил. Отвечу в ближайшее время.\n\n"
+        "Сообщение получено. Ответим в ближайшее время.\n\n"
         "Или напрямую: @oceaninthesky",
         reply_markup=main_menu()
     )
 
-# ───── СООБЩЕНИЯ ОТ АДМИНА ─────
+
+# ───── ОТВЕТЫ ОРГАНИЗАТОРА → ПОЛЬЗОВАТЕЛЮ ─────
+
 async def admin_any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if msg.reply_to_message:
         replied_id = msg.reply_to_message.message_id
         entry = pending_replies.get(replied_id)
         logging.info(
-            f"Админ ответил на msg_id={replied_id}. "
-            f"Найдено: {entry}. Всего: {len(pending_replies)}"
+            f"Организатор ответил на msg_id={replied_id}. "
+            f"Найдено: {entry}. Записей: {len(pending_replies)}"
         )
         if not entry:
             await msg.reply_text(
-                f"⚠️ Не нашёл пользователя для этого сообщения.\n"
+                f"Не нашёл пользователя для этого сообщения.\n"
                 f"Записей в памяти: {len(pending_replies)}\n"
                 f"ID сообщения: {replied_id}\n\n"
-                f"Попроси пользователя написать снова."
+                f"Попросите пользователя написать снова."
             )
             return
 
         user_chat_id, user_name = entry
         await context.bot.send_message(
             chat_id=user_chat_id,
-            text=f"💬 <b>Ответ организатора:</b>\n\n{msg.text}",
+            text=f"<b>Ответ организатора:</b>\n\n{msg.text}",
             parse_mode="HTML",
             reply_markup=main_menu()
         )
         await msg.reply_text(
-            f"✅ Ответ отправлен → <b>{user_name}</b>", parse_mode="HTML"
+            f"Ответ отправлен → <b>{user_name}</b>", parse_mode="HTML"
         )
     else:
         await msg.reply_text(
-            "ℹ️ Чтобы ответить пользователю — нажми и удержи нужное сообщение, "
-            "выбери «Ответить» (Reply), и только потом пиши текст.\n\n"
+            "Чтобы ответить пользователю — нажмите и удержите нужное сообщение, "
+            "выберите «Ответить» (Reply), и только затем вводите текст.\n\n"
             f"Записей в памяти: {len(pending_replies)}"
         )
 
+
 # ───── ОБРАБОТЧИК ОШИБОК ─────
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logging.error("Ошибка при обработке обновления:", exc_info=context.error)
 
+
 # ───── ЗАПУСК ─────
+
 async def main_async():
     request = HTTPXRequest(
         connect_timeout=30,
@@ -493,7 +522,7 @@ async def main_async():
     ) & ~filters.Chat(ADMIN_ID)
     app.add_handler(MessageHandler(media_filter, forward_media_to_admin))
 
-    # Сообщения от админа
+    # Сообщения от организатора
     app.add_handler(MessageHandler(
         filters.Chat(ADMIN_ID) & filters.TEXT & ~filters.COMMAND,
         admin_any_message
@@ -522,6 +551,7 @@ async def main_async():
         await app.updater.stop()
         await app.stop()
 
+
 def main():
     while True:
         try:
@@ -530,8 +560,9 @@ def main():
             logging.info("Бот остановлен.")
             break
         except Exception as e:
-            logging.error(f"Бот упал с ошибкой: {e}. Перезапускаю через 5 секунд...")
+            logging.error(f"Бот упал с ошибкой: {e}. Перезапуск через 5 секунд...")
             time.sleep(5)
+
 
 if __name__ == "__main__":
     main()
