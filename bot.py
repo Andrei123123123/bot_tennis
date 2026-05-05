@@ -3,7 +3,7 @@ import asyncio
 import signal
 import logging
 import json
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
@@ -36,10 +36,19 @@ def save_replies(data: dict[int, tuple[int, str]]):
 # Хранит: {message_id пересланного сообщения → (chat_id, имя пользователя)}
 pending_replies: dict[int, tuple[int, str]] = load_replies()
 
+# ───── ФОТО АКТИВНОСТЕЙ ─────
+# Вставь сюда прямые ссылки на фото (https://...) когда будут готовы
+ACTIVITY_PHOTOS: list[str] = [
+    # "https://ссылка-на-фото-яхты.jpg",
+    # "https://ссылка-на-фото-тейде.jpg",
+    # "https://ссылка-на-фото-замка.jpg",
+]
+
 # ───── МЕНЮ ─────
 def main_menu():
     keyboard = [
         [InlineKeyboardButton("🎾 Программа и цены", callback_data="programa")],
+        [InlineKeyboardButton("🌊 Активности", callback_data="aktivnosti")],
         [InlineKeyboardButton("🛂 Виза через академию", callback_data="viza")],
         [InlineKeyboardButton("📅 Забронировать место", callback_data="booking")],
         [InlineKeyboardButton("💬 Задать вопрос", callback_data="question")],
@@ -74,20 +83,27 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "programa":
         text = (
             "🎾 <b>Программа и цены</b>\n\n"
-            "7 дней, 6 тренировок — теннис или падел на выбор каждый день.\n"
-            "Тренировки: 16:00–18:00 в Tenerife Tennis Academy.\n\n"
-            "<b>Утром — активности:</b>\n"
-            "— Яхта, купание, дельфины\n"
-            "— Вулкан Тейде, 3718 м\n"
-            "— Ущелье Маска, хайкинг\n"
-            "— Сёрфинг с инструктором\n"
-            "— Банкет в замке Сан-Мигель\n\n"
-            "<b>Цены:</b>\n"
-            "— Кемп: 110 000 ₽\n"
-            "— Вилла: 50 000 ₽\n"
-            "— Авиа: ~90 000 ₽ (помогаем подобрать)\n"
-            "— Виза: ~20 000 ₽ (оформляем через партнёра)\n\n"
-            "Полный пакет: ~270 000 ₽"
+            "14–20 сентября 2026 · Тенерифе · 12 человек\n\n"
+            "━━━━━━━━━━━━━━━\n"
+            "🏅 <b>Кемп — 110 000 ₽</b>\n"
+            "✔️ 6 тренировок в Tenerife Tennis Academy\n"
+            "✔️ Русскоязычный тренер\n"
+            "✔️ Теннис или падел — выбираешь каждый день\n"
+            "✔️ Все активности (яхта, Тейде, сёрфинг, замок)\n"
+            "✔️ Трансфер аэропорт ↔ вилла\n"
+            "✔️ Питание 3 раза в день (личный повар)\n\n"
+            "🏡 <b>Вилла — 50 000 ₽</b>\n"
+            "✔️ 7 ночей, своя комната\n"
+            "✔️ Бассейн, общие зоны\n"
+            "✔️ Личный повар включён\n\n"
+            "✈️ <b>Перелёт — ~90 000 ₽</b>\n"
+            "Помогаем подобрать билеты\n\n"
+            "🛂 <b>Виза — ~20 000 ₽</b>\n"
+            "Шенген через партнёра, 97% одобрение\n\n"
+            "━━━━━━━━━━━━━━━\n"
+            "💰 <b>Итого: ~270 000 ₽</b>\n"
+            "Депозит для брони: 33 000 ₽\n"
+            "Остаток — двумя платежами до сентября"
         )
 
     elif query.data == "viza":
@@ -126,6 +142,38 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "организатор получит его и ответит лично.\n\n"
             "Или сразу в личку: @oceaninthesky"
         )
+
+    elif query.data == "aktivnosti":
+        aktivnosti_text = (
+            "🌊 <b>Активности</b>\n\n"
+            "Каждое утро — новое приключение:\n\n"
+            "⛵ <b>Яхта</b>\n"
+            "Выход в океан, купание, дельфины\n\n"
+            "🌋 <b>Вулкан Тейде, 3718 м</b>\n"
+            "Самая высокая точка Испании\n\n"
+            "🏔 <b>Ущелье Маска</b>\n"
+            "Хайкинг по одному из красивейших маршрутов Канар\n\n"
+            "🏄 <b>Сёрфинг</b>\n"
+            "С инструктором, для любого уровня\n\n"
+            "🏰 <b>Банкет в замке Сан-Мигель</b>\n"
+            "Рыцарское шоу, ужин, живая история\n\n"
+            "Все активности включены в стоимость кемпа."
+        )
+        if ACTIVITY_PHOTOS:
+            media = [InputMediaPhoto(media=url) for url in ACTIVITY_PHOTOS]
+            media[0] = InputMediaPhoto(media=ACTIVITY_PHOTOS[0], caption=aktivnosti_text, parse_mode="HTML")
+            await query.message.reply_media_group(media=media)
+            await query.edit_message_text(
+                "🌊 Смотри фото активностей выше 👆",
+                reply_markup=InlineKeyboardMarkup(back)
+            )
+        else:
+            await query.edit_message_text(
+                text=aktivnosti_text,
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(back)
+            )
+        return
 
     elif query.data == "back":
         await query.edit_message_text(
