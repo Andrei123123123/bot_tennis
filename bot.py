@@ -478,7 +478,7 @@ async def main_async():
             CommandHandler("start", start),
             CommandHandler("menu", menu_command),
         ],
-        per_message=False,
+        per_message=True,
     )
 
     app.add_handler(CommandHandler("start", start))
