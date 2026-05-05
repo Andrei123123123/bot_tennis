@@ -285,8 +285,17 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif query.data == "back":
+        name = query.from_user.first_name
         await query.edit_message_text(
-            "Выберите интересующий раздел:",
+            f"Добрый день, {name}.\n\n"
+            "Теннис и падел-кемп на Тенерифе. 20–26 октября 2026.\n\n"
+            "7 дней на Канарских островах: вилла с личным поваром, "
+            "6 тренировок в Tenerife Tennis Academy, "
+            "яхта, вулкан Тейде, серфинг. "
+            "Шенген по спортивному приглашению от академии.\n\n"
+            f"Группа — 12 человек. Осталось {spots_left()} мест.\n"
+            "Стоимость — 1 350 €. Перелёт и виза — отдельно.\n\n"
+            "В любой момент напишите /menu, чтобы вернуться в меню.",
             reply_markup=main_menu()
         )
 
