@@ -22,10 +22,15 @@ if not TOKEN:
 
 ADMIN_ID = int(os.environ.get("ADMIN_CHAT_ID", "5495812267"))
 
-REPLIES_FILE = "pending_replies.json"
+REPLIES_FILE   = "pending_replies.json"
+FOLLOWUP_FILE  = "followup_state.json"
+MAX_REPLIES    = 500   # максимум записей в pending_replies
 
 def spots_left() -> str:
     return os.environ.get("SPOTS_LEFT", "12")
+
+
+# ───── ПЕРСИСТЕНТНОЕ ХРАНИЛИЩЕ ─────
 
 def load_replies() -> dict:
     if os.path.exists(REPLIES_FILE):
@@ -38,15 +43,37 @@ def load_replies() -> dict:
     return {}
 
 def save_replies(data: dict):
+    # Оставляем только последние MAX_REPLIES записей
+    if len(data) > MAX_REPLIES:
+        keys = sorted(data.keys())
+        for k in keys[:len(data) - MAX_REPLIES]:
+            del data[k]
     with open(REPLIES_FILE, "w") as f:
         json.dump({str(k): list(v) for k, v in data.items()}, f)
+
+def load_followup_state() -> tuple[set, set]:
+    if os.path.exists(FOLLOWUP_FILE):
+        try:
+            with open(FOLLOWUP_FILE, "r") as f:
+                data = json.load(f)
+                return set(data.get("sent", [])), set(data.get("engaged", []))
+        except Exception:
+            pass
+    return set(), set()
+
+def save_followup_state():
+    with open(FOLLOWUP_FILE, "w") as f:
+        json.dump({
+            "sent":    list(followup_sent),
+            "engaged": list(user_engaged),
+        }, f)
+
 
 # {message_id пересланного сообщения → (chat_id пользователя, имя)}
 pending_replies: dict = load_replies()
 
-# Follow-up: отслеживание пользователей
-followup_sent: set = set()   # кому уже отправили follow-up
-user_engaged: set = set()    # кто написал или забронировал
+# Follow-up: персистентное отслеживание
+followup_sent, user_engaged = load_followup_state()
 
 # Состояния формы бронирования
 WAITING_NAME, WAITING_PHONE = range(2)
@@ -57,12 +84,12 @@ WAITING_NAME, WAITING_PHONE = range(2)
 def main_menu():
     keyboard = [
         [InlineKeyboardButton("🎾 Программа и цена (1 350 €)", callback_data="programa")],
-        [InlineKeyboardButton("🏡 Вилла и сервис", callback_data="villa")],
-        [InlineKeyboardButton("🌋 Активности вне корта", callback_data="aktivnosti")],
-        [InlineKeyboardButton("✈️ Виза и перелёт", callback_data="viza")],
-        [InlineKeyboardButton("❓ Частые вопросы", callback_data="faq")],
-        [InlineKeyboardButton("📋 Забронировать место", callback_data="booking")],
-        [InlineKeyboardButton("💬 Задать вопрос", callback_data="question")],
+        [InlineKeyboardButton("🏡 Вилла и сервис",             callback_data="villa")],
+        [InlineKeyboardButton("🌋 Активности вне корта",       callback_data="aktivnosti")],
+        [InlineKeyboardButton("✈️ Виза и перелёт",             callback_data="viza")],
+        [InlineKeyboardButton("❓ Частые вопросы",             callback_data="faq")],
+        [InlineKeyboardButton("📋 Забронировать место",        callback_data="booking")],
+        [InlineKeyboardButton("💬 Задать вопрос",              callback_data="question")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -71,6 +98,18 @@ def cancel_keyboard():
 
 def back_keyboard():
     return InlineKeyboardMarkup([[InlineKeyboardButton("← Назад", callback_data="back")]])
+
+def welcome_text(name: str) -> str:
+    return (
+        f"Добрый день, {name}.\n\n"
+        "Теннис и падел-кемп на Тенерифе. 20–26 октября 2026.\n\n"
+        "7 дней на Канарских островах: вилла с личным поваром, "
+        "6 тренировок в Tenerife Tennis Academy, "
+        "яхта, вулкан Тейде, серфинг. "
+        "Шенген по спортивному приглашению от академии.\n\n"
+        f"Группа — 12 человек. Осталось {spots_left()} мест.\n"
+        "Стоимость — 1 350 €. Перелёт и виза — отдельно."
+    )
 
 
 # ───── FOLLOW-UP ЧЕРЕЗ 24 ЧАСА ─────
@@ -85,38 +124,29 @@ async def send_followup(bot, user_id: int, user_name: str):
             text="Если остались вопросы по кемпу — пишите прямо сюда, отвечу лично.",
         )
         followup_sent.add(user_id)
+        save_followup_state()
         logging.info(f"Follow-up отправлен: {user_name} ({user_id})")
     except Exception as e:
-        logging.warning(f"Не удалось отправить follow-up пользователю {user_id}: {e}")
+        logging.warning(f"Не удалось отправить follow-up {user_id}: {e}")
 
 
 # ───── СТАРТ ─────
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    name = user.first_name
     full_name = f"{user.first_name} {user.last_name or ''}".strip()
     username_str = f"@{user.username}" if user.username else "—"
 
-    # Приветствие — отдельное сообщение, оно никогда не редактируется
-    await update.message.reply_text(
-        f"Добрый день, {name}.\n\n"
-        "Теннис и падел-кемп на Тенерифе. 20–26 октября 2026.\n\n"
-        "7 дней на Канарских островах: вилла с личным поваром, "
-        "6 тренировок в Tenerife Tennis Academy, "
-        "яхта, вулкан Тейде, серфинг. "
-        "Шенген по спортивному приглашению от академии.\n\n"
-        f"Группа — 12 человек. Осталось {spots_left()} мест.\n"
-        "Стоимость — 1 350 €. Перелёт и виза — отдельно."
-    )
+    # Сообщение 1: приветствие — никогда не редактируется
+    await update.message.reply_text(welcome_text(user.first_name))
 
-    # Меню — второе сообщение, только оно редактируется при навигации
+    # Сообщение 2: меню — только оно редактируется при навигации
     await update.message.reply_text(
         "Выберите интересующий раздел:",
         reply_markup=main_menu()
     )
 
-    # Уведомление организатору о новом пользователе
+    # Уведомление организатору
     try:
         await context.bot.send_message(
             chat_id=ADMIN_ID,
@@ -127,9 +157,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
     except Exception as e:
-        logging.warning(f"Не удалось уведомить админа о новом пользователе: {e}")
+        logging.warning(f"Не удалось уведомить админа: {e}")
 
-    # Запускаем follow-up через 24 часа
+    # Follow-up через 24 часа
     if user.id not in followup_sent:
         asyncio.create_task(send_followup(context.bot, user.id, full_name))
 
@@ -137,6 +167,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ───── КОМАНДА /menu ─────
 
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    # Сообщение 1: приветствие
+    await update.message.reply_text(welcome_text(user.first_name))
+    # Сообщение 2: меню
     await update.message.reply_text(
         "Выберите интересующий раздел:",
         reply_markup=main_menu()
@@ -203,8 +237,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "⛵ Яхта\n"
                 "Выход в Атлантику, купание в открытом океане.\n\n"
                 "🌋 Вулкан Тейде — 3 718 м\n"
-                "Самая высокая точка Испании. "
-                "Панорама острова с вершины.\n\n"
+                "Самая высокая точка Испании. Панорама острова с вершины.\n\n"
                 "🏔 Ущелье Маска\n"
                 "Один из наиболее живописных маршрутов Канарских островов.\n\n"
                 "🏄 Серфинг\n"
@@ -227,8 +260,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "🛂 <b>Виза</b>\n"
                 "Тенерифе — Испания, требуется шенгенская виза.\n\n"
                 "Оформляется через партнёра <b>VIZAGO</b> под ключ, "
-                "на основе спортивного приглашения от Tenerife Tennis Academy. "
-                "Это официальный документ, подтверждающий спортивный характер поездки.\n\n"
+                "на основе спортивного приглашения от Tenerife Tennis Academy.\n\n"
                 "Что входит в услугу VIZAGO:\n"
                 "· Получение приглашения от академии\n"
                 "· Подготовка документов\n"
@@ -249,22 +281,19 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Любой. Кемп подходит и начинающим, и тем, кто играет годами. "
                 "Тренер адаптирует нагрузку под каждого участника.\n\n"
                 "❓ <b>Можно играть и теннис, и падел?</b>\n"
-                "Да. Каждый день вы выбираете дисциплину самостоятельно. "
-                "Можно чередовать в течение всей недели.\n\n"
+                "Да. Каждый день вы выбираете дисциплину самостоятельно.\n\n"
                 "❓ <b>Можно приехать одному, без компании?</b>\n"
                 "Да. Большинство участников едут именно так. "
                 "Группа — 12 человек, формат располагает к знакомствам.\n\n"
                 "❓ <b>Что входит в стоимость 1 350 €?</b>\n"
-                "Проживание на вилле (7 ночей), питание (шеф-повар), "
-                "6 тренировок, трансфер аэропорт ↔ вилла, все активности.\n"
-                "Перелёт и виза — оплачиваются отдельно.\n\n"
+                "Проживание (7 ночей), питание (шеф-повар), "
+                "6 тренировок, трансфер, все активности. "
+                "Перелёт и виза — отдельно.\n\n"
                 "❓ <b>Как устроена оплата?</b>\n"
                 "Депозит 350 € — для фиксации места. "
-                "Остаток — двумя платежами до октября. "
-                "Реквизиты предоставляются после оформления заявки.\n\n"
+                "Остаток — двумя платежами до октября.\n\n"
                 "❓ <b>Что если в визе откажут?</b>\n"
-                "VIZAGO работает на основе официального спортивного приглашения — "
-                "это повышает вероятность одобрения. "
+                "VIZAGO работает на основе официального спортивного приглашения. "
                 "В случае отказа обсуждаем индивидуально.\n\n"
                 "❓ <b>Когда лучше бронировать?</b>\n"
                 f"Как можно раньше. Осталось {spots_left()} мест из 12. "
@@ -280,6 +309,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif query.data == "question":
         user_engaged.add(query.from_user.id)
+        save_followup_state()
         await query.edit_message_text(
             text=(
                 "Напишите ваш вопрос прямо здесь — "
@@ -302,6 +332,7 @@ async def booking_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_engaged.add(query.from_user.id)
+    save_followup_state()
     await query.edit_message_text(
         f"Забронировать место.\n\n"
         f"Осталось {spots_left()} мест из 12.\n\n"
@@ -313,6 +344,7 @@ async def booking_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def booking_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["booking_name"] = update.message.text
     user_engaged.add(update.effective_user.id)
+    save_followup_state()
     await update.message.reply_text(
         "Оставьте ваш номер телефона или @username в Telegram.",
         reply_markup=cancel_keyboard()
@@ -325,6 +357,7 @@ async def booking_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     phone = update.message.text
     username_str = f"@{user.username}" if user.username else "—"
     user_engaged.add(user.id)
+    save_followup_state()
 
     sent = await context.bot.send_message(
         chat_id=ADMIN_ID,
@@ -367,6 +400,7 @@ async def forward_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full_name = f"{user.first_name} {user.last_name or ''}".strip()
     username_str = f"@{user.username}" if user.username else "—"
     user_engaged.add(user.id)
+    save_followup_state()
 
     sent = await context.bot.send_message(
         chat_id=ADMIN_ID,
@@ -395,6 +429,7 @@ async def forward_media_to_admin(update: Update, context: ContextTypes.DEFAULT_T
     full_name = f"{user.first_name} {user.last_name or ''}".strip()
     username_str = f"@{user.username}" if user.username else "—"
     user_engaged.add(user.id)
+    save_followup_state()
 
     msg = update.message
     if msg.photo:
@@ -412,14 +447,19 @@ async def forward_media_to_admin(update: Update, context: ContextTypes.DEFAULT_T
     else:
         media_type = "файл"
 
-    await context.bot.send_message(
+    # Сохраняем уведомление в pending_replies — чтобы организатор мог ответить
+    sent = await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=(
             f"📎 <b>{media_type.capitalize()} от: {full_name}</b> ({username_str})\n"
-            f"🆔 <code>{user.id}</code>"
+            f"🆔 <code>{user.id}</code>\n\n"
+            f"Ответьте на это сообщение — ответ уйдёт клиенту."
         ),
         parse_mode="HTML"
     )
+    pending_replies[sent.message_id] = (user.id, full_name)
+    save_replies(pending_replies)
+
     await context.bot.forward_message(
         chat_id=ADMIN_ID,
         from_chat_id=msg.chat_id,
@@ -440,10 +480,7 @@ async def admin_any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if msg.reply_to_message:
         replied_id = msg.reply_to_message.message_id
         entry = pending_replies.get(replied_id)
-        logging.info(
-            f"Организатор ответил на msg_id={replied_id}. "
-            f"Найдено: {entry}. Записей: {len(pending_replies)}"
-        )
+        logging.info(f"Reply на msg_id={replied_id}. Найдено: {entry}. Записей: {len(pending_replies)}")
         if not entry:
             await msg.reply_text(
                 f"Не нашёл пользователя для этого сообщения.\n"
@@ -489,6 +526,7 @@ async def main_async():
     app = Application.builder().token(TOKEN).request(request).build()
 
     # Форма бронирования
+    # per_message=False — состояние привязано к пользователю, не к сообщению
     booking_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(booking_start, pattern="^booking$")],
         states={
@@ -512,7 +550,7 @@ async def main_async():
             CommandHandler("start", start),
             CommandHandler("menu", menu_command),
         ],
-        per_message=True,
+        per_message=False,
     )
 
     app.add_handler(CommandHandler("start", start))
