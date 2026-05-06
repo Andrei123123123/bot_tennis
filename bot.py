@@ -22,12 +22,12 @@ if not TOKEN:
 
 ADMIN_ID = int(os.environ.get("ADMIN_CHAT_ID", "5495812267"))
 
-REPLIES_FILE   = "pending_replies.json"
-FOLLOWUP_FILE  = "followup_state.json"
-MAX_REPLIES    = 500   # максимум записей в pending_replies
+REPLIES_FILE  = "pending_replies.json"
+FOLLOWUP_FILE = "followup_state.json"
+MAX_REPLIES   = 500
 
 def spots_left() -> str:
-    return os.environ.get("SPOTS_LEFT", "12")
+    return os.environ.get("SPOTS_LEFT", "14")
 
 
 # ───── ПЕРСИСТЕНТНОЕ ХРАНИЛИЩЕ ─────
@@ -43,7 +43,6 @@ def load_replies() -> dict:
     return {}
 
 def save_replies(data: dict):
-    # Оставляем только последние MAX_REPLIES записей
     if len(data) > MAX_REPLIES:
         keys = sorted(data.keys())
         for k in keys[:len(data) - MAX_REPLIES]:
@@ -69,13 +68,9 @@ def save_followup_state():
         }, f)
 
 
-# {message_id пересланного сообщения → (chat_id пользователя, имя)}
 pending_replies: dict = load_replies()
-
-# Follow-up: персистентное отслеживание
 followup_sent, user_engaged = load_followup_state()
 
-# Состояния формы бронирования
 WAITING_NAME, WAITING_PHONE = range(2)
 
 
@@ -83,13 +78,13 @@ WAITING_NAME, WAITING_PHONE = range(2)
 
 def main_menu():
     keyboard = [
-        [InlineKeyboardButton("🎾 Программа и цена (1 350 €)", callback_data="programa")],
-        [InlineKeyboardButton("🏡 Вилла и сервис",             callback_data="villa")],
-        [InlineKeyboardButton("🌋 Активности вне корта",       callback_data="aktivnosti")],
-        [InlineKeyboardButton("✈️ Виза и перелёт",             callback_data="viza")],
-        [InlineKeyboardButton("❓ Частые вопросы",             callback_data="faq")],
-        [InlineKeyboardButton("📋 Забронировать место",        callback_data="booking")],
-        [InlineKeyboardButton("💬 Задать вопрос",              callback_data="question")],
+        [InlineKeyboardButton("🎾 Программа и цена",    callback_data="programa")],
+        [InlineKeyboardButton("🏡 Вилла и сервис",      callback_data="villa")],
+        [InlineKeyboardButton("🌋 Активности вне корта", callback_data="aktivnosti")],
+        [InlineKeyboardButton("✈️ Виза и перелёт",       callback_data="viza")],
+        [InlineKeyboardButton("❓ Частые вопросы",       callback_data="faq")],
+        [InlineKeyboardButton("📋 Забронировать место",  callback_data="booking")],
+        [InlineKeyboardButton("💬 Задать вопрос",        callback_data="question")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -107,8 +102,8 @@ def welcome_text(name: str) -> str:
         "6 тренировок в Tenerife Tennis Academy, "
         "яхта, вулкан Тейде, серфинг. "
         "Шенген по спортивному приглашению от академии.\n\n"
-        f"Группа — 12 человек. Осталось {spots_left()} мест.\n"
-        "Стоимость — 1 350 €. Перелёт и виза — отдельно."
+        f"Группа — 14 человек. Осталось {spots_left()} мест.\n"
+        "Стоимость — от 1 950 €. Перелёт и виза — отдельно."
     )
 
 
@@ -137,16 +132,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full_name = f"{user.first_name} {user.last_name or ''}".strip()
     username_str = f"@{user.username}" if user.username else "—"
 
-    # Сообщение 1: приветствие — никогда не редактируется
     await update.message.reply_text(welcome_text(user.first_name))
-
-    # Сообщение 2: меню — только оно редактируется при навигации
     await update.message.reply_text(
         "Выберите интересующий раздел:",
         reply_markup=main_menu()
     )
 
-    # Уведомление организатору
     try:
         await context.bot.send_message(
             chat_id=ADMIN_ID,
@@ -159,7 +150,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logging.warning(f"Не удалось уведомить админа: {e}")
 
-    # Follow-up через 24 часа
     if user.id not in followup_sent:
         asyncio.create_task(send_followup(context.bot, user.id, full_name))
 
@@ -168,9 +158,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    # Сообщение 1: приветствие
     await update.message.reply_text(welcome_text(user.first_name))
-    # Сообщение 2: меню
     await update.message.reply_text(
         "Выберите интересующий раздел:",
         reply_markup=main_menu()
@@ -187,25 +175,23 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             text=(
                 "<b>Программа и цена</b>\n\n"
-                "20–26 октября 2026 · Тенерифе · 12 человек\n\n"
+                "20–26 октября 2026 · Тенерифе · 14 человек\n\n"
                 "━━━━━━━━━━━━━━━\n"
-                "<b>1 350 € — всё включено:</b>\n\n"
+                "<b>Кемп — 1 350 €</b>\n\n"
                 "🎾 6 тренировок в Tenerife Tennis Academy\n"
-                "Теннис или падел — выбираете каждый день. Русскоязычный тренер.\n\n"
-                "🏡 Проживание на вилле — 7 ночей\n"
-                "Вилла на всю группу. Бассейн, терраса, общие зоны.\n\n"
-                "👨‍🍳 Питание\n"
-                "Завтрак, обед и ужин — шеф-повар. Всё на вилле.\n\n"
-                "🚌 Трансфер\n"
-                "Аэропорт ↔ вилла включён.\n\n"
+                "Теннис или падел — выбираете каждый день.\n\n"
                 "🌋 Все активности\n"
                 "Яхта, вулкан Тейде, ущелье Маска, серфинг, банкет в замке.\n\n"
+                "🚌 Трансфер\n"
+                "Аэропорт ↔ вилла и по всему острову.\n\n"
+                "━━━━━━━━━━━━━━━\n"
+                "<b>Вилла — 600 €</b>\n\n"
+                "🏡 7 ночей, личный шеф-повар (завтрак, обед, ужин),\n"
+                "бассейн, Wi-Fi, общие зоны.\n\n"
                 "━━━━━━━━━━━━━━━\n"
                 "Оплачивается отдельно:\n"
-                "· Перелёт — от 600 €\n"
-                "· Виза — около 200 €\n\n"
-                "Депозит для фиксации места: 350 €\n"
-                "Остаток — двумя платежами до октября."
+                "· Перелёт — около 900 € (туда-обратно)\n"
+                "· Виза — около 200 €"
             ),
             parse_mode="HTML",
             reply_markup=back_keyboard()
@@ -221,6 +207,10 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "👨‍🍳 Личный шеф-повар на весь кемп.\n"
                 "Завтрак, обед, ужин — на вилле. "
                 "Меню согласовывается заранее с учётом предпочтений группы.\n\n"
+                "🛏 Варианты размещения:\n"
+                "· Индивидуальная комната\n"
+                "· Комната на двоих — две односпальные кровати\n"
+                "· Комната на двоих — одна двуспальная кровать\n\n"
                 "📶 Wi-Fi, всё необходимое для комфортного проживания.\n\n"
                 "Вилла расположена в удобной точке острова — "
                 "10–15 минут до академии и основных активностей."
@@ -255,8 +245,9 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text=(
                 "<b>Виза и перелёт</b>\n\n"
                 "✈️ <b>Перелёт</b>\n"
-                "Тенерифе-Юг (TFS) — прямые рейсы из Москвы и Санкт-Петербурга. "
-                "Стоимость от 600 €. Помогаем подобрать подходящий рейс.\n\n"
+                "Тенерифе-Юг (TFS) — рейсы из Москвы и Санкт-Петербурга. "
+                "Наиболее оптимальный вариант со всеми услугами — около 900 € туда-обратно. "
+                "Помогаем подобрать подходящий рейс.\n\n"
                 "🛂 <b>Виза</b>\n"
                 "Тенерифе — Испания, требуется шенгенская виза.\n\n"
                 "Оформляется через партнёра <b>VIZAGO</b> под ключ, "
@@ -264,7 +255,8 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Что входит в услугу VIZAGO:\n"
                 "· Получение приглашения от академии\n"
                 "· Подготовка документов\n"
-                "· Запись в консульство\n\n"
+                "· Запись в консульство\n"
+                "· Оформление спортивной страховки\n\n"
                 "Стоимость: около 200 €\n"
                 "Срок оформления: 2–4 недели\n\n"
                 "Рекомендуем бронировать место минимум за 6–8 недель до вылета."
@@ -284,19 +276,18 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Да. Каждый день вы выбираете дисциплину самостоятельно.\n\n"
                 "❓ <b>Можно приехать одному, без компании?</b>\n"
                 "Да. Большинство участников едут именно так. "
-                "Группа — 12 человек, формат располагает к знакомствам.\n\n"
-                "❓ <b>Что входит в стоимость 1 350 €?</b>\n"
-                "Проживание (7 ночей), питание (шеф-повар), "
-                "6 тренировок, трансфер, все активности. "
-                "Перелёт и виза — отдельно.\n\n"
+                "Группа — 14 человек, формат располагает к знакомствам.\n\n"
+                "❓ <b>Что входит в кемп (1 350 €)?</b>\n"
+                "6 тренировок, все активности, трансфер аэропорт ↔ вилла и по острову.\n"
+                "Вилла с питанием — 600 €. Перелёт и виза — отдельно.\n\n"
                 "❓ <b>Как устроена оплата?</b>\n"
-                "Депозит 350 € — для фиксации места. "
-                "Остаток — двумя платежами до октября.\n\n"
+                "Реквизиты предоставляются после оформления заявки. "
+                "Оплата — двумя частями до октября.\n\n"
                 "❓ <b>Что если в визе откажут?</b>\n"
                 "VIZAGO работает на основе официального спортивного приглашения. "
                 "В случае отказа обсуждаем индивидуально.\n\n"
                 "❓ <b>Когда лучше бронировать?</b>\n"
-                f"Как можно раньше. Осталось {spots_left()} мест из 12. "
+                "Как можно раньше. "
                 "На оформление визы нужно минимум 6–8 недель.\n\n"
                 "❓ <b>Что взять с собой?</b>\n"
                 "Ракетку (можно взять на месте), спортивную форму, солнцезащитный крем. "
@@ -334,8 +325,7 @@ async def booking_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_engaged.add(query.from_user.id)
     save_followup_state()
     await query.edit_message_text(
-        f"Забронировать место.\n\n"
-        f"Осталось {spots_left()} мест из 12.\n\n"
+        "Забронировать место.\n\n"
         "Как к вам обращаться? (Имя и фамилия)",
         reply_markup=cancel_keyboard()
     )
@@ -447,7 +437,6 @@ async def forward_media_to_admin(update: Update, context: ContextTypes.DEFAULT_T
     else:
         media_type = "файл"
 
-    # Сохраняем уведомление в pending_replies — чтобы организатор мог ответить
     sent = await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=(
@@ -525,8 +514,6 @@ async def main_async():
     )
     app = Application.builder().token(TOKEN).request(request).build()
 
-    # Форма бронирования
-    # per_message=False — состояние привязано к пользователю, не к сообщению
     booking_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(booking_start, pattern="^booking$")],
         states={
@@ -546,7 +533,9 @@ async def main_async():
             ],
         },
         fallbacks=[
+            # «Назад» и «Отмена» выходят из формы одинаково
             CallbackQueryHandler(booking_cancel, pattern="^cancel_booking$"),
+            CallbackQueryHandler(booking_cancel, pattern="^back$"),
             CommandHandler("start", start),
             CommandHandler("menu", menu_command),
         ],
@@ -558,20 +547,17 @@ async def main_async():
     app.add_handler(booking_conv)
     app.add_handler(CallbackQueryHandler(button))
 
-    # Медиафайлы от пользователей
     media_filter = (
         filters.PHOTO | filters.VOICE | filters.VIDEO |
         filters.Document.ALL | filters.Sticker.ALL | filters.VIDEO_NOTE
     ) & ~filters.Chat(ADMIN_ID)
     app.add_handler(MessageHandler(media_filter, forward_media_to_admin))
 
-    # Сообщения от организатора
     app.add_handler(MessageHandler(
         filters.Chat(ADMIN_ID) & filters.TEXT & ~filters.COMMAND,
         admin_any_message
     ))
 
-    # Текстовые сообщения от пользователей
     app.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & ~filters.Chat(ADMIN_ID),
         forward_to_admin
